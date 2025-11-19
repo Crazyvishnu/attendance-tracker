@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 College Attendance Tracker
-Scrapes attendance from college website and sends WhatsApp notifications
+Scrapes attendance from MGIT college website and sends WhatsApp notifications
 """
 
 import os
@@ -35,8 +35,6 @@ def setup_driver():
     
     # For GitHub Actions, use chromium-chromedriver
     chrome_options.binary_location = "/usr/bin/chromium-browser"
-    
-    # Service pointing to chromedriver
     service = Service("/usr/bin/chromedriver")
     
     driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -66,115 +64,66 @@ def try_find_element(driver, selectors_list, element_name):
     return None
 
 def login_to_college_portal(driver, username, password):
-    """Login to college website with multiple selector attempts"""
+    """Login to college website"""
     print(f"[{datetime.now()}] Navigating to college portal...")
     driver.get(COLLEGE_URL)
     
     try:
-        # Wait for page to load
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
         
-        # Save screenshot for debugging
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-        screenshot_path = SCREENSHOT_DIR / f"login_page_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        screenshot_path = SCREENSHOT_DIR / f"01_login_page_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         driver.save_screenshot(str(screenshot_path))
-        print(f"  📸 Screenshot saved: {screenshot_path}")
+        print(f"  📸 Screenshot: {screenshot_path}")
         
-        time.sleep(3)  # Wait for any JavaScript to load
+        time.sleep(3)
         
-        print(f"[{datetime.now()}] Looking for login form elements...")
+        print(f"[{datetime.now()}] Looking for login form...")
         
-        # Try multiple common selectors for username field
         username_selectors = [
-            ("name", "username"),
-            ("id", "username"),
-            ("id", "user"),
-            ("name", "user"),
-            ("name", "login"),
-            ("id", "email"),
-            ("name", "email"),
-            ("name", "userid"),
-            ("id", "userid"),
+            ("name", "username"), ("id", "username"), ("name", "user"),
             ("xpath", "//input[@type='text'][1]"),
-            ("xpath", "//input[@type='email']"),
-            ("css", "input[placeholder*='username' i]"),
-            ("css", "input[placeholder*='user' i]"),
         ]
         
-        # Try multiple common selectors for password field
         password_selectors = [
-            ("name", "password"),
-            ("id", "password"),
-            ("name", "passwd"),
-            ("id", "passwd"),
-            ("name", "pwd"),
-            ("id", "pwd"),
+            ("name", "passwd"), ("name", "password"), ("id", "password"),
             ("xpath", "//input[@type='password']"),
-            ("css", "input[type='password']"),
         ]
         
-        # Try multiple common selectors for login button
         button_selectors = [
-            ("id", "login"),
-            ("id", "submit"),
-            ("name", "login"),
-            ("name", "submit"),
-            ("name", "Submit"),
+            ("name", "login"), ("id", "login"), ("xpath", "//input[@type='submit']"),
             ("xpath", "//button[@type='submit']"),
-            ("xpath", "//input[@type='submit']"),
-            ("xpath", "//button[contains(text(), 'Sign in')]"),
-            ("xpath", "//button[contains(text(), 'Login')]"),
-            ("xpath", "//input[@value='Login']"),
-            ("xpath", "//input[@value='Sign in']"),
-            ("xpath", "//button[contains(@class, 'login')]"),
-            ("xpath", "//button[contains(@class, 'submit')]"),
-            ("css", "button[type='submit']"),
-            ("css", "input[type='submit']"),
         ]
         
-        # Find username field
         username_field = try_find_element(driver, username_selectors, "username field")
         if not username_field:
-            print("❌ ERROR: Could not find username field")
             return False
         
-        # Find password field
         password_field = try_find_element(driver, password_selectors, "password field")
         if not password_field:
-            print("❌ ERROR: Could not find password field")
             return False
         
-        # Find login button
         login_button = try_find_element(driver, button_selectors, "login button")
         if not login_button:
-            print("❌ ERROR: Could not find login button")
             return False
         
-        # Enter credentials
         print(f"[{datetime.now()}] Entering credentials...")
         username_field.clear()
         username_field.send_keys(username)
         password_field.clear()
         password_field.send_keys(password)
-        
-        # Take screenshot before clicking login
-        screenshot_path = SCREENSHOT_DIR / f"before_login_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        driver.save_screenshot(str(screenshot_path))
-        print(f"  📸 Screenshot saved: {screenshot_path}")
-        
         login_button.click()
         
-        print(f"[{datetime.now()}] Login submitted, waiting for dashboard...")
-        time.sleep(5)  # Wait for redirect
+        print(f"[{datetime.now()}] Login submitted, waiting...")
+        time.sleep(5)
         
-        # Take screenshot after login
-        screenshot_path = SCREENSHOT_DIR / f"after_login_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        screenshot_path = SCREENSHOT_DIR / f"02_after_login_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         driver.save_screenshot(str(screenshot_path))
-        print(f"  📸 Screenshot saved: {screenshot_path}")
-        
+        print(f"  📸 Screenshot: {screenshot_path}")
         print(f"  ✓ Login completed")
+        
         return True
         
     except Exception as e:
@@ -183,138 +132,168 @@ def login_to_college_portal(driver, username, password):
         traceback.print_exc()
         return False
 
-def scrape_attendance(driver):
-    """Scrape attendance data from the portal"""
+def navigate_to_attendance(driver):
+    """Navigate to Student Info page to see attendance"""
     try:
-        print(f"[{datetime.now()}] Scraping attendance data...")
+        print(f"[{datetime.now()}] Navigating to Student Info...")
         
-        # Save current page screenshot
-        screenshot_path = SCREENSHOT_DIR / f"attendance_page_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        # Try to find and click "Student Info" link
+        student_info_selectors = [
+            ("xpath", "//a[contains(text(), 'Student Info')]"),
+            ("xpath", "//a[contains(text(), 'Student')]"),
+            ("xpath", "//a[contains(@href, 'Student')]"),
+            ("xpath", "//a[contains(@href, 'student')]"),
+            ("xpath", "//a[contains(text(), 'Info')]"),
+            ("css", "a[href*='student']"),
+        ]
+        
+        student_info_link = try_find_element(driver, student_info_selectors, "Student Info link")
+        
+        if student_info_link:
+            student_info_link.click()
+            print(f"  ✓ Clicked Student Info link")
+            time.sleep(4)  # Wait for page to load
+            
+            screenshot_path = SCREENSHOT_DIR / f"03_student_info_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            driver.save_screenshot(str(screenshot_path))
+            print(f"  📸 Screenshot: {screenshot_path}")
+            
+            return True
+        else:
+            print(f"  ⚠️ Could not find Student Info link")
+            return False
+            
+    except Exception as e:
+        print(f"[{datetime.now()}] Navigation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def scrape_attendance(driver):
+    """Scrape attendance data from Student Info page"""
+    try:
+        print(f"[{datetime.now()}] Scraping attendance from current page...")
+        
+        # Save screenshot
+        screenshot_path = SCREENSHOT_DIR / f"04_scraping_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         driver.save_screenshot(str(screenshot_path))
-        print(f"  📸 Screenshot saved: {screenshot_path}")
+        print(f"  📸 Screenshot: {screenshot_path}")
         
-        # Get page source for analysis
+        # Get page source
         page_source = driver.page_source
-        print(f"  📄 Page source length: {len(page_source)} characters")
+        current_url = driver.current_url
         
-        # Save page source to file for debugging
-        html_file = DATA_DIR / f"page_source_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        print(f"  🌐 Current URL: {current_url}")
+        print(f"  📄 Page source: {len(page_source)} characters")
+        
+        # Save HTML for analysis
+        html_file = DATA_DIR / f"student_info_page_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
         with open(html_file, 'w', encoding='utf-8') as f:
             f.write(page_source)
-        print(f"  💾 Page source saved: {html_file}")
+        print(f"  💾 HTML saved: {html_file}")
         
-        # Get current URL to understand where we are
-        current_url = driver.current_url
-        print(f"  🌐 Current URL: {current_url}")
+        # Search for attendance percentage
+        import re
         
-        # Try to find attendance data using multiple patterns
         attendance_data = {
-            "url_after_login": current_url,
+            "url": current_url,
             "timestamp": datetime.now().isoformat()
         }
         
-        # Pattern 1: Look for ALL percentages in text
-        import re
-        percentages = re.findall(r'(\d+(?:\.\d+)?)\s*%', page_source)
-        if percentages:
-            print(f"  Found {len(percentages)} percentages: {percentages}")
-            attendance_data["all_percentages_found"] = percentages
+        # Pattern 1: Look for 74.5 or decimal percentages
+        decimals_with_percent = re.findall(r'(\d+\.\d+)\s*%', page_source)
+        if decimals_with_percent:
+            print(f"  Found decimal percentages: {decimals_with_percent}")
+            attendance_data["decimal_percentages"] = decimals_with_percent
             
-            # Instead of guessing, save all for user to review
-            print(f"  ⚠️ Multiple percentages found - check HTML to identify correct one")
+            # If 74.5 or similar is found, use it
+            for val in decimals_with_percent:
+                if float(val) > 50 and float(val) < 100:
+                    attendance_data["likely_attendance"] = f"{val}%"
+                    print(f"  ✓ Likely attendance value: {val}%")
         
-        # Pattern 2: Look for text containing "attendance"
-        attendance_text = re.findall(r'attendance[^<]{0,100}(\d+(?:\.\d+)?)\s*%', page_source, re.IGNORECASE)
-        if attendance_text:
-            print(f"  Found attendance-related percentages: {attendance_text}")
-            attendance_data["attendance_percentages"] = attendance_text
+        # Pattern 2: Look for ALL percentages
+        all_percentages = re.findall(r'(\d+)\s*%', page_source)
+        if all_percentages:
+            print(f"  All percentages: {all_percentages[:15]}")
+            attendance_data["all_percentages"] = all_percentages[:20]
         
-        # Pattern 3: Try to find tables and extract ALL data
-        try:
-            tables = driver.find_elements(By.TAG_NAME, "table")
-            print(f"  Found {len(tables)} tables on page")
-            
-            all_table_data = []
-            for i, table in enumerate(tables):
-                rows = table.find_elements(By.TAG_NAME, "tr")
-                print(f"    Table {i+1}: {len(rows)} rows")
+        # Pattern 3: Look for text containing "attendance" nearby percentages
+        attendance_context = re.findall(
+            r'attendance[^<]{0,200}?(\d+\.?\d*)\s*%',
+            page_source,
+            re.IGNORECASE
+        )
+        if attendance_context:
+            print(f"  Attendance context values: {attendance_context}")
+            attendance_data["attendance_context"] = attendance_context
+        
+        # Pattern 4: Extract all text to find attendance
+        visible_text = driver.find_element(By.TAG_NAME, "body").text
+        
+        # Look for attendance in visible text
+        text_lines = visible_text.split('\n')
+        for i, line in enumerate(text_lines):
+            if 'attendance' in line.lower():
+                # Get surrounding lines
+                context_lines = text_lines[max(0, i-2):min(len(text_lines), i+3)]
+                print(f"  Attendance text context: {' | '.join(context_lines)}")
                 
-                table_content = []
-                for row_idx, row in enumerate(rows):
-                    cells = row.find_elements(By.TAG_NAME, "td")
-                    if not cells:
-                        cells = row.find_elements(By.TAG_NAME, "th")
-                    
-                    if cells:
-                        row_data = [cell.text.strip() for cell in cells]
-                        if any(row_data):  # Only add non-empty rows
-                            table_content.append(row_data)
-                            print(f"      Row {row_idx}: {row_data}")
-                
-                if table_content:
-                    all_table_data.append({
-                        "table_index": i + 1,
-                        "rows": table_content
-                    })
-            
-            if all_table_data:
-                attendance_data["tables"] = all_table_data
-                
-        except Exception as e:
-            print(f"  Could not analyze tables: {e}")
+                # Look for percentage in these lines
+                for ctx_line in context_lines:
+                    percent_match = re.search(r'(\d+\.?\d*)\s*%', ctx_line)
+                    if percent_match:
+                        attendance_data["found_in_text"] = percent_match.group(1) + "%"
+                        print(f"  ✓ Found in text: {percent_match.group(1)}%")
         
-        print(f"[{datetime.now()}] ✓ Page data captured")
-        print(f"  📁 Check data/page_source_*.html to see the full page")
-        print(f"  📸 Check data/screenshots/ to see visual representation")
+        # Pattern 5: Save full visible text
+        text_file = DATA_DIR / f"visible_text_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        with open(text_file, 'w', encoding='utf-8') as f:
+            f.write(visible_text)
+        print(f"  💾 Visible text saved: {text_file}")
         
+        print(f"[{datetime.now()}] ✓ Data captured")
         return attendance_data
         
     except Exception as e:
-        print(f"[{datetime.now()}] Error scraping attendance: {e}")
+        print(f"[{datetime.now()}] Error scraping: {e}")
         import traceback
         traceback.print_exc()
         return None
 
 def send_whatsapp_message(attendance_data):
-    """Send WhatsApp notification using Twilio (optional)"""
+    """Send WhatsApp notification (optional)"""
     try:
-        # Get credentials from environment
+        from twilio.rest import Client
+        
         account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
         auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
         from_whatsapp = os.environ.get("TWILIO_WHATSAPP_FROM")
         to_whatsapp_number = os.environ.get("WHATSAPP_PHONE")
         
         if not all([account_sid, auth_token, from_whatsapp, to_whatsapp_number]):
-            print(f"[{datetime.now()}] ⚠️ Twilio credentials not configured, skipping WhatsApp")
-            return False
-        
-        # Import Twilio (optional dependency)
-        try:
-            from twilio.rest import Client
-        except ImportError:
-            print(f"[{datetime.now()}] ⚠️ Twilio not installed, skipping WhatsApp")
+            print(f"[{datetime.now()}] ⚠️ Twilio not configured, skipping WhatsApp")
             return False
         
         to_whatsapp = f"whatsapp:{to_whatsapp_number}"
-        
         client = Client(account_sid, auth_token)
         
-        # Format message with all data for review
-        message_text = f"""🎓 Attendance Tracker Update
+        # Get best attendance value
+        attendance_val = (
+            attendance_data.get("found_in_text") or
+            attendance_data.get("likely_attendance") or
+            "Check GitHub for captured data"
+        )
+        
+        message_text = f"""🎓 Attendance Update
 📅 {datetime.now().strftime('%d %B %Y, %I:%M %p')}
 
-✅ Tracker is running!
+📊 Attendance: {attendance_val}
 
-📄 Data captured from college portal.
-Check your GitHub repo for:
-• All percentages found: {attendance_data.get('all_percentages_found', [][:5])}
-• Screenshots in data/screenshots/
-• HTML in data/ folder
-
+✅ Data saved to GitHub
 🔗 github.com/Crazyvishnu/attendance-tracker
 """
         
-        # Send message
         message = client.messages.create(
             from_=from_whatsapp,
             body=message_text,
@@ -325,31 +304,26 @@ Check your GitHub repo for:
         return True
         
     except Exception as e:
-        print(f"[{datetime.now()}] ⚠️ WhatsApp failed (non-critical): {e}")
-        print(f"  Continuing without WhatsApp notification...")
+        print(f"[{datetime.now()}] ⚠️ WhatsApp failed (non-critical): {str(e)[:100]}")
         return False
 
 def save_attendance_data(attendance_data):
     """Save attendance data to JSON file"""
     try:
-        # Create data directory if it doesn't exist
         DATA_DIR.mkdir(exist_ok=True)
         
-        # Load existing data
         if DATA_FILE.exists():
             with open(DATA_FILE, 'r') as f:
                 all_data = json.load(f)
         else:
             all_data = []
         
-        # Add new entry
         entry = {
             "timestamp": datetime.now().isoformat(),
-            "data_captured": attendance_data
+            "data": attendance_data
         }
         all_data.append(entry)
         
-        # Save back to file
         with open(DATA_FILE, 'w') as f:
             json.dump(all_data, f, indent=2)
         
@@ -363,84 +337,89 @@ def save_attendance_data(attendance_data):
 def main():
     """Main execution function"""
     print(f"\n{'='*60}")
-    print(f"College Attendance Tracker Started")
+    print(f"MGIT Attendance Tracker Started")
     print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}\n")
     
     driver = None
     
     try:
-        # Get credentials
         username = os.environ.get("COLLEGE_USERNAME")
         password = os.environ.get("COLLEGE_PASSWORD")
         
         if not username or not password:
-            print("❌ ERROR: College credentials not found in environment variables")
-            print("   Make sure COLLEGE_USERNAME and COLLEGE_PASSWORD are set in GitHub Secrets")
+            print("❌ ERROR: Credentials not found in GitHub Secrets")
             return
         
         print(f"✓ Credentials loaded (Username: {username[:3]}***)")
         
         # Setup browser
-        print(f"[{datetime.now()}] Setting up Chrome browser...")
+        print(f"[{datetime.now()}] Setting up Chrome...")
         driver = setup_driver()
-        print(f"  ✓ Chrome driver initialized")
+        print(f"  ✓ Chrome initialized")
         
-        # Login
+        # Step 1: Login
         if not login_to_college_portal(driver, username, password):
             print("❌ ERROR: Login failed")
-            print("   Check the screenshots in data/screenshots/ to see what happened")
             return
-        
         print(f"  ✓ Login successful")
         
-        # Scrape attendance
+        # Step 2: Navigate to Student Info
+        if not navigate_to_attendance(driver):
+            print("⚠️ WARNING: Could not navigate to Student Info")
+            print("  Attempting to scrape current page anyway...")
+        else:
+            print(f"  ✓ Navigated to Student Info page")
+        
+        # Step 3: Scrape attendance
         attendance_data = scrape_attendance(driver)
         
         if not attendance_data:
-            print("❌ ERROR: Failed to scrape attendance")
+            print("❌ ERROR: Failed to scrape")
             return
         
-        print(f"  ✓ Attendance data retrieved")
+        print(f"  ✓ Attendance data captured")
         
-        # Save data (this is the main goal)
+        # Step 4: Save data
         save_attendance_data(attendance_data)
         print(f"  ✓ Data saved to repository")
         
-        # Try to send WhatsApp notification (optional)
-        whatsapp_sent = send_whatsapp_message(attendance_data)
-        if whatsapp_sent:
-            print(f"  ✓ WhatsApp notification sent")
+        # Step 5: Send WhatsApp (optional)
+        if send_whatsapp_message(attendance_data):
+            print(f"  ✓ WhatsApp sent")
         else:
-            print(f"  ⚠️ WhatsApp skipped (check Twilio setup if needed)")
+            print(f"  ⚠️ WhatsApp skipped")
         
         print(f"\n{'='*60}")
-        print(f"✅ Attendance Tracker Completed Successfully!")
+        print(f"✅ Tracker Completed Successfully!")
         print(f"{'='*60}\n")
-        print(f"\n📊 ATTENDANCE DATA SUMMARY:")
-        print(f"  - All percentages found: {attendance_data.get('all_percentages_found', [])}")
-        print(f"  - Tables captured: {len(attendance_data.get('tables', []))}")
-        print(f"  - Full data saved to: {DATA_FILE}")
-        print(f"  - Screenshots saved to: {SCREENSHOT_DIR}")
-        print(f"\n🔍 TO FIND YOUR CORRECT ATTENDANCE:")
-        print(f"  1. Check the screenshots in data/screenshots/")
-        print(f"  2. Check the HTML file in data/")
-        print(f"  3. Look at data/attendance_log.json for all captured data")
-        print(f"  4. Identify which percentage is your actual attendance")
-        print(f"  5. Update the script to extract that specific value")
+        
+        # Print summary
+        print("\n📊 CAPTURED DATA:")
+        if "found_in_text" in attendance_data:
+            print(f"  🎯 Attendance found: {attendance_data['found_in_text']}")
+        elif "likely_attendance" in attendance_data:
+            print(f"  🎯 Likely attendance: {attendance_data['likely_attendance']}")
+        elif "decimal_percentages" in attendance_data:
+            print(f"  📊 Decimal percentages: {attendance_data['decimal_percentages']}")
+        
+        print(f"\n📁 Check these files in your repo:")
+        print(f"  • data/attendance_log.json - All captured data")
+        print(f"  • data/screenshots/ - Visual screenshots")
+        print(f"  • data/*.html - Page HTML source")
+        print(f"  • data/*.txt - Visible text content")
         
     except Exception as e:
-        print(f"\n❌ ERROR in main execution: {e}")
+        print(f"\n❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
         
-        # Try to save screenshot even on error
         if driver:
             try:
                 SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-                error_screenshot = SCREENSHOT_DIR / f"error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                error_screenshot = SCREENSHOT_DIR / f"ERROR_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
                 driver.save_screenshot(str(error_screenshot))
-                print(f"\n📸 Error screenshot saved: {error_screenshot}")
+                print(f"\n📸 Error screenshot: {error_screenshot}")
             except:
                 pass
         
