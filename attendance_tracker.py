@@ -14,6 +14,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from twilio.rest import Client
 
@@ -24,15 +25,22 @@ DATA_FILE = DATA_DIR / "attendance_log.json"
 SCREENSHOT_DIR = DATA_DIR / "screenshots"
 
 def setup_driver():
-    """Setup headless Chrome driver"""
+    """Setup headless Chrome driver for GitHub Actions"""
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     
-    driver = webdriver.Chrome(options=chrome_options)
+    # For GitHub Actions, use chromium-chromedriver
+    chrome_options.binary_location = "/usr/bin/chromium-browser"
+    
+    # Service pointing to chromedriver
+    service = Service("/usr/bin/chromedriver")
+    
+    driver = webdriver.Chrome(service=service, options=chrome_options)
     return driver
 
 def try_find_element(driver, selectors_list, element_name):
@@ -75,7 +83,7 @@ def login_to_college_portal(driver, username, password):
         driver.save_screenshot(str(screenshot_path))
         print(f"  📸 Screenshot saved: {screenshot_path}")
         
-        time.sleep(2)  # Wait for any JavaScript to load
+        time.sleep(3)  # Wait for any JavaScript to load
         
         print(f"[{datetime.now()}] Looking for login form elements...")
         
@@ -88,7 +96,9 @@ def login_to_college_portal(driver, username, password):
             ("name", "login"),
             ("id", "email"),
             ("name", "email"),
-            ("xpath", "//input[@type='text']"),
+            ("name", "userid"),
+            ("id", "userid"),
+            ("xpath", "//input[@type='text'][1]"),
             ("xpath", "//input[@type='email']"),
             ("css", "input[placeholder*='username' i]"),
             ("css", "input[placeholder*='user' i]"),
@@ -101,6 +111,7 @@ def login_to_college_portal(driver, username, password):
             ("name", "passwd"),
             ("id", "passwd"),
             ("name", "pwd"),
+            ("id", "pwd"),
             ("xpath", "//input[@type='password']"),
             ("css", "input[type='password']"),
         ]
@@ -111,12 +122,15 @@ def login_to_college_portal(driver, username, password):
             ("id", "submit"),
             ("name", "login"),
             ("name", "submit"),
+            ("name", "Submit"),
             ("xpath", "//button[@type='submit']"),
             ("xpath", "//input[@type='submit']"),
             ("xpath", "//button[contains(text(), 'Sign in')]"),
             ("xpath", "//button[contains(text(), 'Login')]"),
             ("xpath", "//input[@value='Login']"),
             ("xpath", "//input[@value='Sign in']"),
+            ("xpath", "//button[contains(@class, 'login')]"),
+            ("xpath", "//button[contains(@class, 'submit')]"),
             ("css", "button[type='submit']"),
             ("css", "input[type='submit']"),
         ]
@@ -125,18 +139,21 @@ def login_to_college_portal(driver, username, password):
         username_field = try_find_element(driver, username_selectors, "username field")
         if not username_field:
             print("❌ ERROR: Could not find username field")
+            print("   Check the screenshot to see the page structure")
             return False
         
         # Find password field
         password_field = try_find_element(driver, password_selectors, "password field")
         if not password_field:
             print("❌ ERROR: Could not find password field")
+            print("   Check the screenshot to see the page structure")
             return False
         
         # Find login button
         login_button = try_find_element(driver, button_selectors, "login button")
         if not login_button:
             print("❌ ERROR: Could not find login button")
+            print("   Check the screenshot to see the page structure")
             return False
         
         # Enter credentials
@@ -161,6 +178,7 @@ def login_to_college_portal(driver, username, password):
         driver.save_screenshot(str(screenshot_path))
         print(f"  📸 Screenshot saved: {screenshot_path}")
         
+        print(f"  ✓ Login completed")
         return True
         
     except Exception as e:
@@ -196,37 +214,57 @@ def scrape_attendance(driver):
         import re
         percentages = re.findall(r'(\d+(?:\.\d+)?)\s*%', page_source)
         if percentages:
-            print(f"  Found percentages in page: {percentages}")
+            print(f"  Found {len(percentages)} percentages in page: {percentages[:5]}")
             if percentages:
                 attendance_data["overall_percentage"] = f"{percentages[0]}%"
+                attendance_data["all_percentages"] = percentages[:10]  # First 10
         
         # Pattern 2: Try to find table with attendance
         try:
             tables = driver.find_elements(By.TAG_NAME, "table")
             print(f"  Found {len(tables)} tables on page")
             
+            subjects_data = {}
             for i, table in enumerate(tables):
                 rows = table.find_elements(By.TAG_NAME, "tr")
                 print(f"    Table {i+1}: {len(rows)} rows")
+                
+                # Try to extract data from table
+                for row_idx, row in enumerate(rows[:10]):
+                    cells = row.find_elements(By.TAG_NAME, "td")
+                    if len(cells) >= 2:
+                        text = [cell.text.strip() for cell in cells]
+                        print(f"      Row {row_idx}: {text}")
+                        
+                        # Look for subject name and percentage
+                        for cell_text in text:
+                            if '%' in cell_text:
+                                # Try to find subject name in same row
+                                subject_name = text[0] if text[0] and '%' not in text[0] else f"Subject_{row_idx}"
+                                subjects_data[subject_name] = cell_text
+            
+            if subjects_data:
+                attendance_data["subjects"] = subjects_data
                 
         except Exception as e:
             print(f"  Could not analyze tables: {e}")
         
         # If we found some data, use it
-        if attendance_data:
-            print(f"[{datetime.now()}] Attendance data found: {attendance_data}")
+        if attendance_data and ("overall_percentage" in attendance_data or "subjects" in attendance_data):
+            print(f"[{datetime.now()}] ✓ Attendance data found: {attendance_data}")
             return attendance_data
         else:
             print(f"[{datetime.now()}] ⚠️ No attendance data found automatically")
             print(f"  Check the saved HTML file and screenshots in data/ directory")
-            print(f"  You'll need to update the scraping logic based on the actual HTML structure")
+            print(f"  The script will still run and save debugging info for you to analyze")
             
-            # Return placeholder data for testing
+            # Return debugging info
             return {
                 "status": "manual_update_needed",
-                "message": "Check screenshots and HTML in data/ directory to update selectors",
+                "message": "Login successful but attendance selectors need customization",
                 "page_source_saved": str(html_file),
-                "screenshot_saved": str(screenshot_path)
+                "screenshot_saved": str(screenshot_path),
+                "timestamp": datetime.now().isoformat()
             }
         
     except Exception as e:
@@ -255,16 +293,16 @@ def send_whatsapp_message(attendance_data):
             message_text = f"""🎓 Attendance Tracker Alert
 📅 {datetime.now().strftime('%d %B %Y, %I:%M %p')}
 
-⚠️ Setup Required:
-The attendance tracker ran but needs selector updates.
+✅ Script is running successfully!
+⚠️ Needs customization:
 
-Check your GitHub repository for:
+Login worked! Check GitHub repo for:
 • Screenshots in data/screenshots/
 • HTML source in data/
 
-Use these to update the selectors in attendance_tracker.py
+Use these to update selectors in attendance_tracker.py
 
-✅ Script is working - just needs customization!
+🔗 Repo: github.com/Crazyvishnu/attendance-tracker
 """
         else:
             message_text = f"""🎓 Attendance Update
@@ -346,7 +384,7 @@ def main():
             print("   Make sure COLLEGE_USERNAME and COLLEGE_PASSWORD are set in GitHub Secrets")
             return
         
-        print(f"✓ Credentials loaded (Username: {username})")
+        print(f"✓ Credentials loaded (Username: {username[:3]}***)")
         
         # Setup browser
         print(f"[{datetime.now()}] Setting up Chrome browser...")
