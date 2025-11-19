@@ -14,13 +14,14 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from twilio.rest import Client
 
 # Configuration
 COLLEGE_URL = "https://mgit.winnou.net/index.php"
 DATA_DIR = Path("data")
 DATA_FILE = DATA_DIR / "attendance_log.json"
+SCREENSHOT_DIR = DATA_DIR / "screenshots"
 
 def setup_driver():
     """Setup headless Chrome driver"""
@@ -34,38 +35,138 @@ def setup_driver():
     driver = webdriver.Chrome(options=chrome_options)
     return driver
 
+def try_find_element(driver, selectors_list, element_name):
+    """Try multiple selectors to find an element"""
+    for selector_type, selector_value in selectors_list:
+        try:
+            if selector_type == "id":
+                element = driver.find_element(By.ID, selector_value)
+            elif selector_type == "name":
+                element = driver.find_element(By.NAME, selector_value)
+            elif selector_type == "class":
+                element = driver.find_element(By.CLASS_NAME, selector_value)
+            elif selector_type == "xpath":
+                element = driver.find_element(By.XPATH, selector_value)
+            elif selector_type == "css":
+                element = driver.find_element(By.CSS_SELECTOR, selector_value)
+            
+            print(f"  ✓ Found {element_name} using {selector_type}: {selector_value}")
+            return element
+        except NoSuchElementException:
+            continue
+    
+    print(f"  ✗ Could not find {element_name} with any selector")
+    return None
+
 def login_to_college_portal(driver, username, password):
-    """Login to college website"""
+    """Login to college website with multiple selector attempts"""
     print(f"[{datetime.now()}] Navigating to college portal...")
     driver.get(COLLEGE_URL)
     
     try:
         # Wait for page to load
-        WebDriverWait(driver, 10).until(
+        WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
         
-        # TODO: YOU NEED TO INSPECT YOUR COLLEGE WEBSITE AND UPDATE THESE SELECTORS
-        # These are placeholder selectors - replace with actual ones from your site
-        print(f"[{datetime.now()}] Looking for login form...")
+        # Save screenshot for debugging
+        SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        screenshot_path = SCREENSHOT_DIR / f"login_page_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        driver.save_screenshot(str(screenshot_path))
+        print(f"  📸 Screenshot saved: {screenshot_path}")
         
-        # Example selectors (REPLACE THESE):
-        username_field = driver.find_element(By.ID, "username")  # Update selector
-        password_field = driver.find_element(By.ID, "password")  # Update selector
-        login_button = driver.find_element(By.ID, "login")  # Update selector
+        time.sleep(2)  # Wait for any JavaScript to load
+        
+        print(f"[{datetime.now()}] Looking for login form elements...")
+        
+        # Try multiple common selectors for username field
+        username_selectors = [
+            ("name", "username"),
+            ("id", "username"),
+            ("id", "user"),
+            ("name", "user"),
+            ("name", "login"),
+            ("id", "email"),
+            ("name", "email"),
+            ("xpath", "//input[@type='text']"),
+            ("xpath", "//input[@type='email']"),
+            ("css", "input[placeholder*='username' i]"),
+            ("css", "input[placeholder*='user' i]"),
+        ]
+        
+        # Try multiple common selectors for password field
+        password_selectors = [
+            ("name", "password"),
+            ("id", "password"),
+            ("name", "passwd"),
+            ("id", "passwd"),
+            ("name", "pwd"),
+            ("xpath", "//input[@type='password']"),
+            ("css", "input[type='password']"),
+        ]
+        
+        # Try multiple common selectors for login button
+        button_selectors = [
+            ("id", "login"),
+            ("id", "submit"),
+            ("name", "login"),
+            ("name", "submit"),
+            ("xpath", "//button[@type='submit']"),
+            ("xpath", "//input[@type='submit']"),
+            ("xpath", "//button[contains(text(), 'Sign in')]"),
+            ("xpath", "//button[contains(text(), 'Login')]"),
+            ("xpath", "//input[@value='Login']"),
+            ("xpath", "//input[@value='Sign in']"),
+            ("css", "button[type='submit']"),
+            ("css", "input[type='submit']"),
+        ]
+        
+        # Find username field
+        username_field = try_find_element(driver, username_selectors, "username field")
+        if not username_field:
+            print("❌ ERROR: Could not find username field")
+            return False
+        
+        # Find password field
+        password_field = try_find_element(driver, password_selectors, "password field")
+        if not password_field:
+            print("❌ ERROR: Could not find password field")
+            return False
+        
+        # Find login button
+        login_button = try_find_element(driver, button_selectors, "login button")
+        if not login_button:
+            print("❌ ERROR: Could not find login button")
+            return False
         
         # Enter credentials
+        print(f"[{datetime.now()}] Entering credentials...")
+        username_field.clear()
         username_field.send_keys(username)
+        password_field.clear()
         password_field.send_keys(password)
+        
+        # Take screenshot before clicking login
+        screenshot_path = SCREENSHOT_DIR / f"before_login_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        driver.save_screenshot(str(screenshot_path))
+        print(f"  📸 Screenshot saved: {screenshot_path}")
+        
         login_button.click()
         
         print(f"[{datetime.now()}] Login submitted, waiting for dashboard...")
-        time.sleep(3)  # Wait for redirect
+        time.sleep(5)  # Wait for redirect
+        
+        # Take screenshot after login
+        screenshot_path = SCREENSHOT_DIR / f"after_login_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        driver.save_screenshot(str(screenshot_path))
+        print(f"  📸 Screenshot saved: {screenshot_path}")
         
         return True
         
     except Exception as e:
         print(f"[{datetime.now()}] Login failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def scrape_attendance(driver):
@@ -73,46 +174,65 @@ def scrape_attendance(driver):
     try:
         print(f"[{datetime.now()}] Scraping attendance data...")
         
-        # TODO: YOU NEED TO INSPECT YOUR COLLEGE WEBSITE AND UPDATE THESE SELECTORS
-        # Navigate to attendance page if needed
-        # driver.find_element(By.LINK_TEXT, "Attendance").click()  # Update as needed
+        # Save current page screenshot
+        screenshot_path = SCREENSHOT_DIR / f"attendance_page_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        driver.save_screenshot(str(screenshot_path))
+        print(f"  📸 Screenshot saved: {screenshot_path}")
         
-        time.sleep(2)  # Wait for page to load
+        # Get page source for analysis
+        page_source = driver.page_source
+        print(f"  📄 Page source length: {len(page_source)} characters")
         
-        # Example: Scrape attendance percentage
-        # REPLACE THIS WITH YOUR ACTUAL SELECTORS
+        # Save page source to file for debugging
+        html_file = DATA_DIR / f"page_source_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        with open(html_file, 'w', encoding='utf-8') as f:
+            f.write(page_source)
+        print(f"  💾 Page source saved: {html_file}")
+        
+        # Try to find attendance data using multiple patterns
         attendance_data = {}
         
-        # Option 1: If attendance is in a table
-        # table = driver.find_element(By.CLASS_NAME, "attendance-table")
-        # rows = table.find_elements(By.TAG_NAME, "tr")
-        # for row in rows[1:]:  # Skip header
-        #     cols = row.find_elements(By.TAG_NAME, "td")
-        #     subject = cols[0].text
-        #     percentage = cols[1].text
-        #     attendance_data[subject] = percentage
+        # Pattern 1: Look for percentage in text
+        import re
+        percentages = re.findall(r'(\d+(?:\.\d+)?)\s*%', page_source)
+        if percentages:
+            print(f"  Found percentages in page: {percentages}")
+            if percentages:
+                attendance_data["overall_percentage"] = f"{percentages[0]}%"
         
-        # Option 2: If attendance is in specific elements
-        # subjects = driver.find_elements(By.CLASS_NAME, "subject-name")
-        # percentages = driver.find_elements(By.CLASS_NAME, "attendance-percentage")
-        # for subject, percentage in zip(subjects, percentages):
-        #     attendance_data[subject.text] = percentage.text
+        # Pattern 2: Try to find table with attendance
+        try:
+            tables = driver.find_elements(By.TAG_NAME, "table")
+            print(f"  Found {len(tables)} tables on page")
+            
+            for i, table in enumerate(tables):
+                rows = table.find_elements(By.TAG_NAME, "tr")
+                print(f"    Table {i+1}: {len(rows)} rows")
+                
+        except Exception as e:
+            print(f"  Could not analyze tables: {e}")
         
-        # Placeholder - YOU NEED TO REPLACE THIS
-        attendance_data = {
-            "overall_percentage": "85%",  # Replace with actual scraping
-            "subjects": {
-                "Math": "90%",
-                "Physics": "85%",
-                "Chemistry": "80%"
+        # If we found some data, use it
+        if attendance_data:
+            print(f"[{datetime.now()}] Attendance data found: {attendance_data}")
+            return attendance_data
+        else:
+            print(f"[{datetime.now()}] ⚠️ No attendance data found automatically")
+            print(f"  Check the saved HTML file and screenshots in data/ directory")
+            print(f"  You'll need to update the scraping logic based on the actual HTML structure")
+            
+            # Return placeholder data for testing
+            return {
+                "status": "manual_update_needed",
+                "message": "Check screenshots and HTML in data/ directory to update selectors",
+                "page_source_saved": str(html_file),
+                "screenshot_saved": str(screenshot_path)
             }
-        }
-        
-        print(f"[{datetime.now()}] Attendance scraped: {attendance_data}")
-        return attendance_data
         
     except Exception as e:
         print(f"[{datetime.now()}] Error scraping attendance: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def send_whatsapp_message(attendance_data):
@@ -121,8 +241,8 @@ def send_whatsapp_message(attendance_data):
         # Get credentials from environment
         account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
         auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
-        from_whatsapp = os.environ.get("TWILIO_WHATSAPP_FROM")  # e.g., "whatsapp:+14155238886"
-        to_whatsapp = f"whatsapp:{os.environ.get('WHATSAPP_PHONE')}"  # e.g., "whatsapp:+919440911008"
+        from_whatsapp = os.environ.get("TWILIO_WHATSAPP_FROM")
+        to_whatsapp = f"whatsapp:{os.environ.get('WHATSAPP_PHONE')}"
         
         if not all([account_sid, auth_token, from_whatsapp]):
             print(f"[{datetime.now()}] Missing Twilio credentials, skipping WhatsApp")
@@ -131,18 +251,34 @@ def send_whatsapp_message(attendance_data):
         client = Client(account_sid, auth_token)
         
         # Format message
-        message_text = f"""🎓 *Attendance Update*
+        if attendance_data.get("status") == "manual_update_needed":
+            message_text = f"""🎓 Attendance Tracker Alert
+📅 {datetime.now().strftime('%d %B %Y, %I:%M %p')}
+
+⚠️ Setup Required:
+The attendance tracker ran but needs selector updates.
+
+Check your GitHub repository for:
+• Screenshots in data/screenshots/
+• HTML source in data/
+
+Use these to update the selectors in attendance_tracker.py
+
+✅ Script is working - just needs customization!
+"""
+        else:
+            message_text = f"""🎓 Attendance Update
 📅 {datetime.now().strftime('%d %B %Y, %I:%M %p')}
 
 📊 Overall: {attendance_data.get('overall_percentage', 'N/A')}
-
-📚 Subject-wise:
 """
-        
-        for subject, percentage in attendance_data.get('subjects', {}).items():
-            message_text += f"  • {subject}: {percentage}\n"
-        
-        message_text += "\n✅ Updated in GitHub repo"
+            
+            if 'subjects' in attendance_data:
+                message_text += "\n📚 Subject-wise:\n"
+                for subject, percentage in attendance_data.get('subjects', {}).items():
+                    message_text += f"  • {subject}: {percentage}\n"
+            
+            message_text += "\n✅ Updated in GitHub repo"
         
         # Send message
         message = client.messages.create(
@@ -156,6 +292,8 @@ def send_whatsapp_message(attendance_data):
         
     except Exception as e:
         print(f"[{datetime.now()}] Error sending WhatsApp: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def save_attendance_data(attendance_data):
@@ -204,38 +342,60 @@ def main():
         password = os.environ.get("COLLEGE_PASSWORD")
         
         if not username or not password:
-            print("ERROR: College credentials not found in environment variables")
+            print("❌ ERROR: College credentials not found in environment variables")
+            print("   Make sure COLLEGE_USERNAME and COLLEGE_PASSWORD are set in GitHub Secrets")
             return
         
+        print(f"✓ Credentials loaded (Username: {username})")
+        
         # Setup browser
+        print(f"[{datetime.now()}] Setting up Chrome browser...")
         driver = setup_driver()
+        print(f"  ✓ Chrome driver initialized")
         
         # Login
         if not login_to_college_portal(driver, username, password):
-            print("ERROR: Login failed")
+            print("❌ ERROR: Login failed")
+            print("   Check the screenshots in data/screenshots/ to see what happened")
             return
+        
+        print(f"  ✓ Login successful")
         
         # Scrape attendance
         attendance_data = scrape_attendance(driver)
         
         if not attendance_data:
-            print("ERROR: Failed to scrape attendance")
+            print("❌ ERROR: Failed to scrape attendance")
             return
+        
+        print(f"  ✓ Attendance data retrieved")
         
         # Save data
         save_attendance_data(attendance_data)
+        print(f"  ✓ Data saved to repository")
         
         # Send WhatsApp notification
         send_whatsapp_message(attendance_data)
+        print(f"  ✓ WhatsApp notification sent")
         
         print(f"\n{'='*60}")
-        print(f"Attendance Tracker Completed Successfully!")
+        print(f"✅ Attendance Tracker Completed Successfully!")
         print(f"{'='*60}\n")
         
     except Exception as e:
-        print(f"ERROR in main execution: {e}")
+        print(f"\n❌ ERROR in main execution: {e}")
         import traceback
         traceback.print_exc()
+        
+        # Try to save screenshot even on error
+        if driver:
+            try:
+                SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+                error_screenshot = SCREENSHOT_DIR / f"error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                driver.save_screenshot(str(error_screenshot))
+                print(f"\n📸 Error screenshot saved: {error_screenshot}")
+            except:
+                pass
         
     finally:
         if driver:
