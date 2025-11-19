@@ -1,0 +1,12 @@
+onEdu @ Mahatma Gandhi Institute of Technology
+Anything in here will be replaced on browsers that support the canvas element
+Sign in
+Username:
+Password:
+Forgot your password?
+
+
+
+
+
+©2025 Supported by winnou.com
