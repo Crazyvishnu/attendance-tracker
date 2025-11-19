@@ -15,7 +15,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementNotInteractableException
 
 # Configuration
 COLLEGE_URL = "https://mgit.winnou.net/index.php"
@@ -33,7 +33,6 @@ def setup_driver():
     chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     
-    # For GitHub Actions, use chromium-chromedriver
     chrome_options.binary_location = "/usr/bin/chromium-browser"
     service = Service("/usr/bin/chromedriver")
     
@@ -137,31 +136,70 @@ def navigate_to_attendance(driver):
     try:
         print(f"[{datetime.now()}] Navigating to Student Info...")
         
-        # Try to find and click "Student Info" link
+        # Strategy 1: Try direct link click with multiple methods
         student_info_selectors = [
             ("xpath", "//a[contains(text(), 'Student Info')]"),
             ("xpath", "//a[contains(text(), 'Student')]"),
-            ("xpath", "//a[contains(@href, 'Student')]"),
-            ("xpath", "//a[contains(@href, 'student')]"),
-            ("xpath", "//a[contains(text(), 'Info')]"),
-            ("css", "a[href*='student']"),
+            ("xpath", "//a[contains(@href, 'id=70')]"),  # From the HTML, Student Info has id=70
+            ("css", "a[href*='id=70']"),
         ]
         
-        student_info_link = try_find_element(driver, student_info_selectors, "Student Info link")
+        student_info_link = None
+        for selector_type, selector_value in student_info_selectors:
+            try:
+                if selector_type == "xpath":
+                    element = driver.find_element(By.XPATH, selector_value)
+                elif selector_type == "css":
+                    element = driver.find_element(By.CSS_SELECTOR, selector_value)
+                
+                print(f"  ✓ Found Student Info link using {selector_type}")
+                student_info_link = element
+                break
+            except NoSuchElementException:
+                continue
         
-        if student_info_link:
-            student_info_link.click()
-            print(f"  ✓ Clicked Student Info link")
-            time.sleep(4)  # Wait for page to load
-            
-            screenshot_path = SCREENSHOT_DIR / f"03_student_info_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            driver.save_screenshot(str(screenshot_path))
-            print(f"  📸 Screenshot: {screenshot_path}")
-            
-            return True
-        else:
-            print(f"  ⚠️ Could not find Student Info link")
+        if not student_info_link:
+            print(f"  ✗ Could not find Student Info link")
             return False
+        
+        # Try multiple click methods
+        click_methods = [
+            ("normal", lambda el: el.click()),
+            ("javascript", lambda el: driver.execute_script("arguments[0].click();", el)),
+            ("scroll_then_click", lambda el: (
+                driver.execute_script("arguments[0].scrollIntoView(true);", el),
+                time.sleep(1),
+                el.click()
+            )),
+        ]
+        
+        clicked = False
+        for method_name, click_func in click_methods:
+            try:
+                print(f"  Trying {method_name} click...")
+                click_func(student_info_link)
+                print(f"  ✓ Clicked using {method_name}")
+                clicked = True
+                break
+            except (ElementNotInteractableException, Exception) as e:
+                print(f"    {method_name} failed: {str(e)[:50]}")
+                continue
+        
+        if not clicked:
+            print(f"  ✗ All click methods failed")
+            # Try direct URL navigation as fallback
+            print(f"  Trying direct URL navigation...")
+            student_info_url = "http://www.winnou.com/index.php?option=com_content&view=article&id=70&Itemid=64"
+            driver.get(student_info_url)
+            print(f"  ✓ Navigated directly to Student Info URL")
+        
+        time.sleep(4)  # Wait for page to load
+        
+        screenshot_path = SCREENSHOT_DIR / f"03_student_info_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        driver.save_screenshot(str(screenshot_path))
+        print(f"  📸 Screenshot: {screenshot_path}")
+        
+        return True
             
     except Exception as e:
         print(f"[{datetime.now()}] Navigation failed: {e}")
@@ -174,25 +212,21 @@ def scrape_attendance(driver):
     try:
         print(f"[{datetime.now()}] Scraping attendance from current page...")
         
-        # Save screenshot
         screenshot_path = SCREENSHOT_DIR / f"04_scraping_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         driver.save_screenshot(str(screenshot_path))
         print(f"  📸 Screenshot: {screenshot_path}")
         
-        # Get page source
         page_source = driver.page_source
         current_url = driver.current_url
         
         print(f"  🌐 Current URL: {current_url}")
         print(f"  📄 Page source: {len(page_source)} characters")
         
-        # Save HTML for analysis
         html_file = DATA_DIR / f"student_info_page_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
         with open(html_file, 'w', encoding='utf-8') as f:
             f.write(page_source)
         print(f"  💾 HTML saved: {html_file}")
         
-        # Search for attendance percentage
         import re
         
         attendance_data = {
@@ -200,53 +234,38 @@ def scrape_attendance(driver):
             "timestamp": datetime.now().isoformat()
         }
         
-        # Pattern 1: Look for 74.5 or decimal percentages
+        # Look for 74.5 or similar decimal attendance
         decimals_with_percent = re.findall(r'(\d+\.\d+)\s*%', page_source)
         if decimals_with_percent:
             print(f"  Found decimal percentages: {decimals_with_percent}")
             attendance_data["decimal_percentages"] = decimals_with_percent
             
-            # If 74.5 or similar is found, use it
             for val in decimals_with_percent:
                 if float(val) > 50 and float(val) < 100:
                     attendance_data["likely_attendance"] = f"{val}%"
-                    print(f"  ✓ Likely attendance value: {val}%")
+                    print(f"  ✓ Likely attendance: {val}%")
         
-        # Pattern 2: Look for ALL percentages
         all_percentages = re.findall(r'(\d+)\s*%', page_source)
         if all_percentages:
             print(f"  All percentages: {all_percentages[:15]}")
             attendance_data["all_percentages"] = all_percentages[:20]
         
-        # Pattern 3: Look for text containing "attendance" nearby percentages
-        attendance_context = re.findall(
-            r'attendance[^<]{0,200}?(\d+\.?\d*)\s*%',
-            page_source,
-            re.IGNORECASE
-        )
-        if attendance_context:
-            print(f"  Attendance context values: {attendance_context}")
-            attendance_data["attendance_context"] = attendance_context
-        
-        # Pattern 4: Extract all text to find attendance
+        # Look for attendance in visible text
         visible_text = driver.find_element(By.TAG_NAME, "body").text
         
-        # Look for attendance in visible text
         text_lines = visible_text.split('\n')
         for i, line in enumerate(text_lines):
             if 'attendance' in line.lower():
-                # Get surrounding lines
                 context_lines = text_lines[max(0, i-2):min(len(text_lines), i+3)]
-                print(f"  Attendance text context: {' | '.join(context_lines)}")
+                context_str = ' | '.join(context_lines)
+                print(f"  Attendance context: {context_str[:200]}")
                 
-                # Look for percentage in these lines
                 for ctx_line in context_lines:
                     percent_match = re.search(r'(\d+\.?\d*)\s*%', ctx_line)
                     if percent_match:
                         attendance_data["found_in_text"] = percent_match.group(1) + "%"
                         print(f"  ✓ Found in text: {percent_match.group(1)}%")
         
-        # Pattern 5: Save full visible text
         text_file = DATA_DIR / f"visible_text_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         with open(text_file, 'w', encoding='utf-8') as f:
             f.write(visible_text)
@@ -278,11 +297,10 @@ def send_whatsapp_message(attendance_data):
         to_whatsapp = f"whatsapp:{to_whatsapp_number}"
         client = Client(account_sid, auth_token)
         
-        # Get best attendance value
         attendance_val = (
             attendance_data.get("found_in_text") or
             attendance_data.get("likely_attendance") or
-            "Check GitHub for captured data"
+            f"Multiple values found: {attendance_data.get('all_percentages', [])[:3]}"
         )
         
         message_text = f"""🎓 Attendance Update
@@ -353,7 +371,6 @@ def main():
         
         print(f"✓ Credentials loaded (Username: {username[:3]}***)")
         
-        # Setup browser
         print(f"[{datetime.now()}] Setting up Chrome...")
         driver = setup_driver()
         print(f"  ✓ Chrome initialized")
@@ -366,10 +383,10 @@ def main():
         
         # Step 2: Navigate to Student Info
         if not navigate_to_attendance(driver):
-            print("⚠️ WARNING: Could not navigate to Student Info")
-            print("  Attempting to scrape current page anyway...")
+            print("⚠️ WARNING: Navigation to Student Info failed")
+            print("  Will scrape current page...")
         else:
-            print(f"  ✓ Navigated to Student Info page")
+            print(f"  ✓ Navigated to Student Info")
         
         # Step 3: Scrape attendance
         attendance_data = scrape_attendance(driver)
@@ -378,13 +395,13 @@ def main():
             print("❌ ERROR: Failed to scrape")
             return
         
-        print(f"  ✓ Attendance data captured")
+        print(f"  ✓ Data captured")
         
-        # Step 4: Save data
+        # Step 4: Save
         save_attendance_data(attendance_data)
-        print(f"  ✓ Data saved to repository")
+        print(f"  ✓ Saved to repository")
         
-        # Step 5: Send WhatsApp (optional)
+        # Step 5: WhatsApp (optional)
         if send_whatsapp_message(attendance_data):
             print(f"  ✓ WhatsApp sent")
         else:
@@ -394,20 +411,15 @@ def main():
         print(f"✅ Tracker Completed Successfully!")
         print(f"{'='*60}\n")
         
-        # Print summary
-        print("\n📊 CAPTURED DATA:")
         if "found_in_text" in attendance_data:
-            print(f"  🎯 Attendance found: {attendance_data['found_in_text']}")
+            print(f"🎯 Attendance: {attendance_data['found_in_text']}")
         elif "likely_attendance" in attendance_data:
-            print(f"  🎯 Likely attendance: {attendance_data['likely_attendance']}")
-        elif "decimal_percentages" in attendance_data:
-            print(f"  📊 Decimal percentages: {attendance_data['decimal_percentages']}")
+            print(f"🎯 Likely attendance: {attendance_data['likely_attendance']}")
         
-        print(f"\n📁 Check these files in your repo:")
-        print(f"  • data/attendance_log.json - All captured data")
-        print(f"  • data/screenshots/ - Visual screenshots")
-        print(f"  • data/*.html - Page HTML source")
-        print(f"  • data/*.txt - Visible text content")
+        print(f"\n📁 Check your repo for:")
+        print(f"  • data/attendance_log.json")
+        print(f"  • data/screenshots/")
+        print(f"  • data/*.html and *.txt files")
         
     except Exception as e:
         print(f"\n❌ ERROR: {e}")
